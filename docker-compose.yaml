@@ -14,13 +14,13 @@ services:
   # 2. Uncomment the port 80 forwarding
   # 3. Set the environment variable in the .env file: PROTOCOL=http
   # 
-  certbot:
-    image: certbot/certbot:v1.4.0
-    volumes:
-      - ./volumes/letsencrypt:/etc/letsencrypt
-    ports: 
-      - 80:80
-    entrypoint: "certbot certonly --non-interactive --agree-tos -m ${ADMIN_EMAIL} --standalone -d ${BASE_DOMAIN}"
+  # certbot:
+  #   image: certbot/certbot:v1.4.0
+  #   volumes:
+  #     - ./volumes/letsencrypt:/etc/letsencrypt
+  #   ports: 
+  #     - 80:80
+  #   entrypoint: "certbot certonly --non-interactive --agree-tos -m ${ADMIN_EMAIL} --standalone -d ${BASE_DOMAIN}"
 
   postgresql:
     image: postgres:12-alpine
@@ -32,16 +32,20 @@ services:
       POSTGRES_DB: ${SQL_BASE}
     volumes: 
       - ./volumes/db:/var/lib/postgresql/data
+    networks:
+      - hmdm
 
   hmdm:
-    image: headwindmdm/hmdm:0.1.5
+    image: galeksandrp/hmdm-docker:hmdm-5.35.1-6.22
     ports:
       # Uncomment this port forwarding if you want to use plain HTTP instead of HTTPS
-      #- 80:8080
-      - 443:8443
+      # - 80:8080
+      # - 443:8443
       - 31000:31000
     volumes:
       - ./volumes/work:/usr/local/tomcat/work
+      - work-cache:/usr/local/tomcat/work/cache
+      - work-files:/usr/local/tomcat/work/files
       - ./volumes/letsencrypt:/etc/letsencrypt
       - ./volumes/hmdm-config:/usr/local/tomcat/conf/Catalina/localhost
     environment:
@@ -59,4 +63,48 @@ services:
       HMDM_URL: ${HMDM_URL}
       CLIENT_VERSION: ${CLIENT_VERSION}
       FORCE_RECONFIGURE: ${FORCE_RECONFIGURE}
+      VIRTUAL_HOST: mdm.kr.specmedtorg.ru
+      LETSENCRYPT_HOST: mdm.kr.specmedtorg.ru
+      VIRTUAL_PORT: 8080
+    networks:
+        hmdm:
+            ipv4_address: 10.100.0.15
 
+  nginx-proxy:
+    image: nginxproxy/nginx-proxy:1.7-alpine
+    container_name: nginx-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      HSTS: off
+    volumes:
+      - ./docker-entrypoint-nginx-proxy.d/certs:/etc/nginx/certs
+      - shared-html:/usr/share/nginx/html
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+    networks:
+      - hmdm
+
+  nginx-proxy-acme:
+    image: nginxproxy/acme-companion
+    volumes_from:
+      - nginx-proxy
+    environment:
+      DEFAULT_EMAIL: galeksandrp@gmail.com
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./docker-entrypoint-nginx-proxy-acme.d/acme.sh:/etc/acme.sh
+
+volumes:
+  work-cache:
+  work-files:
+  shared-html:
+  shared-acme:
+
+networks:
+    hmdm:
+        driver: bridge
+        ipam:
+            driver: default
+            config:
+                - subnet: 10.100.0.0/24
